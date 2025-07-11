@@ -26,14 +26,43 @@ export function Chatting() {
           ],
           temperature: 0.7,
           max_tokens: 100,
+          stream: true,
         }),
       });
 
-      const data = await res.json();
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder("utf-8");
 
-      setResponse(
-        data.choices?.[0]?.message?.content || "No response from AI."
-      );
+      let done = false;
+      let buffer = "";
+
+      while (!done) {
+        const { value, done: doneReading } = await reader.read();
+        done = doneReading;
+
+        const chunk = decoder.decode(value, { stream: true });
+        buffer += chunk;
+
+        const lines = buffer.split("\n");
+
+        // Keep last incomplete line in buffer
+        buffer = lines.pop();
+
+        for (const line of lines) {
+          const trimmedLine = line.trim();
+          if (trimmedLine === "" || trimmedLine === "data: [DONE]") continue;
+
+          try {
+            const json = JSON.parse(trimmedLine.replace(/^data:\s*/, ""));
+            const token = json.choices?.[0]?.delta?.content;
+            if (token) {
+              setResponse((prev) => prev + token);
+            }
+          } catch (err) {
+            console.error("Failed to parse stream chunk:", err);
+          }
+        }
+      }
     } catch (err) {
       console.error("OpenAI API error:", err);
       setResponse("❌ Failed to get response.");
@@ -60,13 +89,13 @@ export function Chatting() {
           className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded disabled:opacity-50"
           disabled={loading}
         >
-          {loading ? "Waiting..." : "Ask"}
+          {loading ? "Streaming..." : "Ask"}
         </button>
 
         <div className="mt-6 border-t pt-4">
           <h2 className="text-lg font-semibold mb-2">Response:</h2>
-          <div className="whitespace-pre-wrap text-gray-800">
-            {loading ? "..." : response || "Your response will appear here..."}
+          <div className="whitespace-pre-wrap text-gray-800 min-h-[50px]">
+            {response || (loading && "...")}
           </div>
         </div>
       </div>
